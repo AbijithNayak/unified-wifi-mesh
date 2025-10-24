@@ -423,15 +423,16 @@ unsigned int em_orch_agent_t::build_candidates(em_cmd_t *pcmd)
                 }
                 break;
 			case em_cmd_type_channel_pref_query:
-				if (!(em->is_al_interface_em())) {
-					radio = pcmd->m_data_model.get_radio(static_cast<unsigned int> (0));
+				if ((em->is_al_interface_em())) {
+                    em_printfout("-----ABHI-----build_candidate---inside--");
+					/*radio = pcmd->m_data_model.get_radio(static_cast<unsigned int> (0));
 					if (radio == NULL) {
 						printf("%s:%d em_cmd_type_channel_pref_query radio cannot be found.\n", __func__, __LINE__);
 						break;
-					}
+					}*/
 
-					if ((memcmp(radio->get_radio_interface_mac(),em->get_radio_interface_mac(),sizeof(mac_address_t)) == 0)
-							&& (em->get_state() >= em_state_agent_topo_synchronized)
+					//if ((memcmp(radio->get_radio_interface_mac(),em->get_radio_interface_mac(),sizeof(mac_address_t)) == 0)
+					if ((em->get_state() >= em_state_agent_topo_synchronized)
 							&& (em->get_state() < em_state_agent_configured)) {
 						queue_push(pcmd->m_em_candidates, em);
 						count++;

@@ -1213,12 +1213,12 @@ unsigned short em_t::create_eht_operations_tlv(unsigned char *buff)
         len += sizeof(mac_address_t);
 
         // Count BSS only for this specific radio
-        num_bss = 0;
+        /*num_bss = 0;
         for (j = 0; j < dm->get_num_bss(); j++) {
             if (memcmp(dm->m_bss[j].m_bss_info.ruid.mac, ruid, sizeof(mac_address_t)) == 0) {
                 num_bss++;
             }
-        }
+        }*/
 
         memcpy(tmp, &num_bss, sizeof(unsigned char));
         tmp += sizeof(unsigned char);

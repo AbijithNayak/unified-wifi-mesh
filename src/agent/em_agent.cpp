@@ -199,7 +199,6 @@ void em_agent_t::handle_channel_pref_query(em_bus_event_t *evt)
 {
     em_cmd_t *pcmd[EM_MAX_CMD] = {NULL};
     unsigned int num;
-
     if (m_orch->is_cmd_type_in_progress(evt) == true) {
         m_agent_cmd->send_result(em_cmd_out_status_prev_cmd_in_progress);
     } else if ((num = m_data_model.analyze_channel_pref_query(evt, pcmd)) == 0) {
@@ -562,11 +561,11 @@ void em_agent_t::handle_recv_wfa_action_frame(em_bus_event_t *evt)
 
     // The frequency (and other wifi data) is prepended to the action frame data
     auto* frame_info = reinterpret_cast<wifi_frame_t*>(evt->u.raw_buff);
-    em_printfout("Received WFA action frame at frequency %d MHz", frame_info->recv_freq);
+   // em_printfout("Received WFA action frame at frequency %d MHz", frame_info->recv_freq);
 
     mgmt_frame_buff += sizeof(wifi_frame_t);
     frame_len       -= sizeof(wifi_frame_t);
-    recv_freq        = frame_info->recv_freq;
+    //recv_freq        = frame_info->recv_freq;
 
     const size_t mgmt_hdr_len = offsetof(struct ieee80211_mgmt, u);
     const size_t fixed_full_header_len = 
@@ -1504,23 +1503,18 @@ em_t *em_agent_t::find_em_for_msg_type(unsigned char *data, unsigned int len, em
             break;
 
         case em_msg_type_channel_pref_query:
-            if (em_msg_t(data + (sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t)),
-                	len - (sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t))).get_radio_id(&ruid) == false) {
-                printf("%s:%d: Could not find radio_id for em_msg_type_channel_pref_query\n", __func__, __LINE__);
-                return NULL;
-            }
-
-            dm_easy_mesh_t::macbytes_to_string(ruid, mac_str1);
-            if ((em = (em_t *)hash_map_get(m_em_map, mac_str1)) != NULL) {
-                if (em->is_al_interface_em() == false) {
-                        printf("%s:%d: Received channel preference query recv, found existing radio:%s\n", __func__, __LINE__, mac_str1);
-                } else {
-                        return NULL;
-                }
-            } else {
-                printf("%s:%d: Could not find em for em_msg_type_channel_pref_query\n", __func__, __LINE__);
-                return NULL;
-            }
+            {
+            	em_string_t al_mac_str;
+            	dm_easy_mesh_t::macbytes_to_string(hdr->dst, al_mac_str);
+            	strcat(al_mac_str, "_al");
+            	if ((em = (em_t *)hash_map_get(m_em_map, al_mac_str)) != NULL) {
+                	em_printfout("Received channel pref query, found al_mac agent:%s", al_mac_str);
+            	} else {
+                	em_printfout("Discarding channel pref query, al_mac agent:%s not found",
+                    	al_mac_str);
+                	return NULL;
+           	 }
+	    }
             break;
 
         case em_msg_type_topo_notif:

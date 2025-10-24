@@ -630,6 +630,7 @@ em_t *em_ctrl_t::find_em_for_msg_type(unsigned char *data, unsigned int len, em_
     unsigned int i;
     bool found;
     mac_addr_str_t mac_str1, mac_str2, dev_mac_str, radio_mac_str;
+    em_string_t al_mac_str;
 
     assert(len > ((sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t))));
     if (len < ((sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t)))) {
@@ -703,9 +704,6 @@ em_t *em_ctrl_t::find_em_for_msg_type(unsigned char *data, unsigned int len, em_
             break;
 
         case em_msg_type_topo_resp:
-        case em_msg_type_channel_pref_rprt:
-        case em_msg_type_channel_sel_rsp:
-        case em_msg_type_op_channel_rprt:
             if (em_msg_t(data + (sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t)),
                     len - static_cast<unsigned int> (sizeof(em_raw_hdr_t) + sizeof(em_cmdu_t))).get_radio_id(&ruid) == false) {
                 printf("%s:%d: Could not find radio id in msg:0x%04x\n", __func__, __LINE__, htons(cmdu->type));
@@ -715,6 +713,20 @@ em_t *em_ctrl_t::find_em_for_msg_type(unsigned char *data, unsigned int len, em_
             dm_easy_mesh_t::macbytes_to_string(ruid, mac_str1);
             if ((em = static_cast<em_t *> (hash_map_get(m_em_map, mac_str1))) == NULL) {
                 printf("%s:%d: Could not find radio:%s\n", __func__, __LINE__, mac_str1);
+                return NULL;
+            }
+            break;
+
+        case em_msg_type_channel_pref_rprt:
+        case em_msg_type_channel_sel_rsp:
+        case em_msg_type_op_channel_rprt:
+            dm_easy_mesh_t::macbytes_to_string(hdr->dst, al_mac_str);
+            strcat(al_mac_str, "_al");
+            if ((em = (em_t *)hash_map_get(m_em_map, al_mac_str)) != NULL) {
+                em_printfout("Received, found al_mac agent:%s", al_mac_str);
+            } else {
+                em_printfout("Discarding, al_mac agent:%s not found",
+                    al_mac_str);
                 return NULL;
             }
             break;
@@ -853,7 +865,6 @@ em_t *em_ctrl_t::find_em_for_msg_type(unsigned char *data, unsigned int len, em_
         break;
 
         case em_msg_type_bh_sta_cap_rprt:
-            em_string_t al_mac_str;
             dm_easy_mesh_t::macbytes_to_string(hdr->src, al_mac_str);
             strcat(al_mac_str, "_al");
             if ((em = (em_t *)hash_map_get(m_em_map, al_mac_str)) != NULL) {
