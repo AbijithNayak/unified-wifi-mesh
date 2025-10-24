@@ -66,10 +66,9 @@ short em_channel_t::create_channel_pref_tlv_agent(unsigned char *buff)
 
     for (i = 0; i < dm->m_num_opclass; i++) {
 	op_class = &dm->m_op_class[i];
-	if (((memcmp(op_class->m_op_class_info.id.ruid, get_radio_interface_mac(), sizeof(mac_address_t)) == 0) &&
-                                        (op_class->m_op_class_info.id.type == em_op_class_type_capability)) == false) {
+	if (op_class->m_op_class_info.id.type != em_op_class_type_capability) {
 	    continue;
-        }
+    }
 	
 	pref_op_class->op_class = static_cast<unsigned char> (op_class->m_op_class_info.op_class);
 	num_of_channel = op_class->m_op_class_info.num_channels;
@@ -161,8 +160,8 @@ short em_channel_t::create_channel_pref_tlv(unsigned char *buff)
 
     for (i = 0; i < dm->m_num_opclass; i++) {
         op_class = &dm->m_op_class[i];
-        if (((memcmp(op_class->m_op_class_info.id.ruid, device->intf.mac, sizeof(mac_address_t)) == 0)     &&
-                    (op_class->m_op_class_info.id.type == em_op_class_type_anticipated)) == false) {
+       // if (((memcmp(op_class->m_op_class_info.id.ruid, device->intf.mac, sizeof(mac_address_t)) == 0)     &&
+        if (op_class->m_op_class_info.id.type != em_op_class_type_anticipated) {
             continue;
         }
         
@@ -757,8 +756,7 @@ short em_channel_t::create_operating_channel_report_tlv(unsigned char *buff)
 
 	for (i = 0; i < dm->m_num_opclass; i++) {
 		op_class = &dm->m_op_class[i];
-		if ((memcmp(op_class->m_op_class_info.id.ruid, rprt_op_class->ruid, sizeof(mac_address_t)) == 0)	&&
-			(op_class->m_op_class_info.id.type == em_op_class_type_current)) {
+		if (op_class->m_op_class_info.id.type == em_op_class_type_current) {
 		
 			tmp = reinterpret_cast<unsigned char *> (rprt_channel);
 			rprt_channel->op_class = static_cast<unsigned char> (op_class->m_op_class_info.op_class);
@@ -934,16 +932,6 @@ int em_channel_t::send_channel_pref_query_msg()
     tmp += sizeof(em_cmdu_t);
     len += sizeof(em_cmdu_t);
 
-    // One AP Radio Identifier tlv 17.2.3
-    tlv = reinterpret_cast<em_tlv_t *> (tmp);
-    tlv->type = em_tlv_type_radio_id;
-    memcpy(tlv->value, get_radio_interface_mac(), sizeof(mac_address_t));
-    tlv->len = htons(sizeof(mac_address_t));
-
-    tmp += (sizeof(em_tlv_t) + sizeof(mac_address_t));
-    len += (sizeof(em_tlv_t) + sizeof(mac_address_t));
-
-
     // End of message
     tlv = reinterpret_cast<em_tlv_t *> (tmp);
     tlv->type = em_tlv_type_eom;
@@ -1042,8 +1030,7 @@ short em_channel_t::create_cac_status_report_tlv(unsigned char *buff)
 
 	for (i = 0; i < dm->m_num_opclass; i++) {
 		op_class = &dm->m_op_class[i];
-		if ((memcmp(op_class->m_op_class_info.id.ruid, ruid, sizeof(mac_address_t)) == 0)	&&
-			(op_class->m_op_class_info.id.type == em_op_class_type_cac_active)) {
+		if (op_class->m_op_class_info.id.type == em_op_class_type_cac_active) {
 		
 			active->op_class = static_cast<unsigned char> (op_class->m_op_class_info.op_class);
 			active->channel = static_cast<unsigned char> (op_class->m_op_class_info.channel);
@@ -1964,10 +1951,26 @@ void em_channel_t::process_state()
 
     switch (get_state()) {
 		case em_state_agent_channel_pref_query:
-			if ((get_service_type() == em_service_type_agent) && (get_state() < em_state_agent_channel_selection_pending)) {
-				send_channel_pref_report_msg();
-				printf("%s:%d channel_pref_report_msg send\n", __func__, __LINE__);
-				set_state(em_state_agent_channel_selection_pending);
+            {
+                int len = 0;
+                std::vector<em_t*> em_radios;
+                get_mgr()->get_all_em_for_al_mac(hdr->dst, em_radios);
+                for (auto &em : em_radios) {
+                    if ((em->get_service_type() == em_service_type_agent) && (em->get_state() >= em_state_agent_channel_selection_pending)) {
+                           em_printfout("radio %s is not in the right state, ignoring", util::mac_to_string(em->get_radio_interface_mac()).c_str());
+                        return;
+                    }
+                }
+                em_printfout("All radios are configured for al_mac:%s, sending channel preference report", util::mac_to_string(hdr->dst).c_str());
+                        
+                len = send_channel_pref_report_msg();
+                if(len) {
+                    for(auto &em : em_radios) {
+                        em->set_state(em_state_agent_channel_selection_pending);
+                    }
+                }
+                em_printfout("Sent channel preference report, set state to em_state_agent_channel_selection_pending");
+                em_radios.clear();
 			}
             break;
         		
@@ -2000,15 +2003,67 @@ void em_channel_t::process_ctrl_state()
     switch (get_state()) {
         case em_state_ctrl_channel_query_pending:
 			if(get_service_type() == em_service_type_ctrl) {
-				send_channel_pref_query_msg();
-				set_state(em_state_ctrl_channel_pref_report_pending);
+                std::vector<em_t *> em_radios;
+                dm_easy_mesh_t *dm = get_data_model();
+                get_mgr()->get_all_em_for_al_mac(dm->get_agent_al_interface_mac(), em_radios);
+                for (auto &em : em_radios) {
+                    if (em->get_state() != em_state_ctrl_channel_query_pending) {
+                        em_printfout("radio %s is not in channel pref query pending state, ignoring",
+                            util::mac_to_string(em->get_radio_interface_mac()).c_str());
+                        return;
+                    }
+                }
+                // If all radios are in channel pref query pending state, send topo query on one of them, 
+                // ignore sending channel pref query query on other radios
+                dm_radio_t *radio = get_radio_from_dm(true);
+                if (radio == NULL) {
+                    radio = get_radio_from_dm();
+                }
+                if (radio != NULL && radio->get_radio_info()->band == em_freq_band_5) {
+                    em_printfout("Sending channel pref query from radio %s for band:%d",
+                        util::mac_to_string(radio->get_radio_interface_mac()).c_str(),
+                        radio->get_radio_info()->band);
+                    send_channel_pref_query_msg();
+                    for(auto &em : em_radios){
+                        em->set_state(em_state_ctrl_channel_pref_report_pending);
+                    }
+                }
+                else {
+                    em_printfout("No 5GHz radio found, do nothing");
+                }
+                em_radios.clear();
 			}
             break;
 
         case em_state_ctrl_channel_select_pending:
         case em_state_ctrl_avail_spectrum_inquiry_pending:
 			if(get_service_type() == em_service_type_ctrl) {
-				send_channel_sel_request_msg();
+                std::vector<em_t *> em_radios;
+                dm_easy_mesh_t *dm = get_data_model();
+                get_mgr()->get_all_em_for_al_mac(dm->get_agent_al_interface_mac(), em_radios);
+                for (auto &em : em_radios) {
+                    if (em->get_state() != em_state_ctrl_channel_query_pending) {
+                        em_printfout("radio %s is not in channel pref query pending state, ignoring",
+                            util::mac_to_string(em->get_radio_interface_mac()).c_str());
+                        return;
+                    }
+                }
+                // If all radios are in channel pref query pending state, send topo query on one of them, 
+                // ignore sending channel pref query query on other radios
+                dm_radio_t *radio = get_radio_from_dm(true);
+                if (radio == NULL) {
+                    radio = get_radio_from_dm();
+                }
+                if (radio != NULL && radio->get_radio_info()->band == em_freq_band_5) {
+                    em_printfout("Sending channel pref query from radio %s for band:%d",
+                        util::mac_to_string(radio->get_radio_interface_mac()).c_str(),
+                        radio->get_radio_info()->band);
+                    send_channel_sel_request_msg();
+                }
+                else {
+                    em_printfout("No 5GHz radio found, do nothing");
+                }
+                em_radios.clear();	
 			}
             break; 
         
