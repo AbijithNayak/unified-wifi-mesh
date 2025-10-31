@@ -42,7 +42,7 @@
 #include "em_cmd_exec.h"
 #include "util.h"
 
-short em_channel_t::create_channel_pref_tlv_agent(unsigned char *buff)
+short em_channel_t::create_channel_pref_tlv_agent(unsigned char *buff, int index)
 {
     short len = 0;
     unsigned int i, j;
@@ -57,7 +57,7 @@ short em_channel_t::create_channel_pref_tlv_agent(unsigned char *buff)
 
     dm = get_data_model();
     pref = reinterpret_cast<em_channel_pref_t *> (buff);
-    memcpy(pref->ruid, get_radio_interface_mac(), sizeof(mac_address_t));
+    memcpy(pref->ruid, dm-> get_radio_by_ref(index).get_radio_interface_mac(), sizeof(mac_address_t));
     pref_op_class = pref->op_classes;
     pref->op_classes_num = 0;
 
@@ -66,7 +66,7 @@ short em_channel_t::create_channel_pref_tlv_agent(unsigned char *buff)
 
     for (i = 0; i < dm->m_num_opclass; i++) {
 	op_class = &dm->m_op_class[i];
-	if (((memcmp(op_class->m_op_class_info.id.ruid, get_radio_interface_mac(), sizeof(mac_address_t)) == 0) &&
+	if (((memcmp(op_class->m_op_class_info.id.ruid, pref->ruid, sizeof(mac_address_t)) == 0) &&
                                         (op_class->m_op_class_info.id.type == em_op_class_type_capability)) == false) {
 	    continue;
         }
@@ -934,16 +934,6 @@ int em_channel_t::send_channel_pref_query_msg()
     tmp += sizeof(em_cmdu_t);
     len += sizeof(em_cmdu_t);
 
-    // One AP Radio Identifier tlv 17.2.3
-    tlv = reinterpret_cast<em_tlv_t *> (tmp);
-    tlv->type = em_tlv_type_radio_id;
-    memcpy(tlv->value, get_radio_interface_mac(), sizeof(mac_address_t));
-    tlv->len = htons(sizeof(mac_address_t));
-
-    tmp += (sizeof(em_tlv_t) + sizeof(mac_address_t));
-    len += (sizeof(em_tlv_t) + sizeof(mac_address_t));
-
-
     // End of message
     tlv = reinterpret_cast<em_tlv_t *> (tmp);
     tlv->type = em_tlv_type_eom;
@@ -1065,43 +1055,48 @@ short em_channel_t::create_cac_status_report_tlv(unsigned char *buff)
 
 short em_channel_t::create_cac_complete_report_tlv(unsigned char *buff)
 {
-	short len = 0;
-	unsigned int i;
-	dm_easy_mesh_t	*dm;
-	dm_cac_comp_t *comp;
-	em_cac_comp_rprt_t *cac_comp;
-	em_cac_comp_rprt_radio_t *cac_comp_radio;
-	em_cac_comp_rprt_pair_t *cac_comp_pair;
+    short len = 0;
+    unsigned int radio_index, pair_index;
+    dm_easy_mesh_t *dm = get_data_model();
+    unsigned char *tmp = buff;
 
-	dm = get_data_model();
+    em_cac_comp_rprt_t *cac_comp = reinterpret_cast<em_cac_comp_rprt_t *>(tmp);
+    cac_comp->radios_num = 0;
+    tmp += sizeof(em_cac_comp_rprt_t);
+    len += static_cast<short>(sizeof(em_cac_comp_rprt_t));
 
-	cac_comp = reinterpret_cast<em_cac_comp_rprt_t *> (buff);
-	cac_comp->radios_num = 1;
-	cac_comp_radio = cac_comp->radios;
+    dm_cac_comp_t *comp = &dm->m_cac_comp;
+    unsigned int num_radios = static_cast<unsigned int>(dm->get_num_radios());
 
-	comp = &dm->m_cac_comp;
+    for (radio_index = 0; radio_index < num_radios; radio_index++) {
+        em_cac_comp_rprt_radio_t *cac_comp_radio = reinterpret_cast<em_cac_comp_rprt_radio_t *>(tmp);
+        memcpy(cac_comp_radio->ruid, dm->get_radio_by_ref(radio_index).get_radio_interface_mac() , sizeof(mac_address_t));
+        cac_comp_radio->op_class = comp->m_cac_comp_info.op_class;
+        cac_comp_radio->channel = comp->m_cac_comp_info.channel;
+        cac_comp_radio->status = comp->m_cac_comp_info.status;
+        cac_comp_radio->detected_pairs_num = comp->m_cac_comp_info.detected_pairs_num;
 
-	memcpy(cac_comp_radio->ruid, comp->m_cac_comp_info.ruid, sizeof(mac_address_t));
-	cac_comp_radio->op_class = comp->m_cac_comp_info.op_class;
-	cac_comp_radio->channel = comp->m_cac_comp_info.channel;
-	cac_comp_radio->status = comp->m_cac_comp_info.status;
-	cac_comp_radio->detected_pairs_num = comp->m_cac_comp_info.detected_pairs_num;
-	cac_comp_pair = cac_comp_radio->detected_pairs;
+        tmp += sizeof(em_cac_comp_rprt_radio_t);
+        len += static_cast<short>(sizeof(em_cac_comp_rprt_radio_t));
 
-	len += static_cast<short unsigned int> (sizeof(em_cac_comp_rprt_t));
-	len += static_cast<short unsigned int> (sizeof(em_cac_comp_rprt_radio_t));
+        em_cac_comp_rprt_pair_t *cac_comp_pair = reinterpret_cast<em_cac_comp_rprt_pair_t *>(tmp);
 
-	for (i = 0; i < cac_comp_radio->detected_pairs_num; i++) {
-		cac_comp_pair->op_class = comp->m_cac_comp_info.detected_pairs[i].op_class;	
-		cac_comp_pair->channel = comp->m_cac_comp_info.detected_pairs[i].channel;	
-		len += static_cast<short unsigned int> (sizeof(em_cac_comp_rprt_pair_t));
-		cac_comp_pair = reinterpret_cast<em_cac_comp_rprt_pair_t *> (reinterpret_cast<unsigned char *> (cac_comp_pair) + sizeof(em_cac_comp_rprt_pair_t));
-	}
+        for (pair_index = 0; pair_index < comp->m_cac_comp_info.detected_pairs_num; pair_index++) {
+            cac_comp_pair->op_class = comp->m_cac_comp_info.detected_pairs[pair_index].op_class;
+            cac_comp_pair->channel = comp->m_cac_comp_info.detected_pairs[pair_index].channel;
 
-	return len;
+            tmp += sizeof(em_cac_comp_rprt_pair_t);
+            len += static_cast<short>(sizeof(em_cac_comp_rprt_pair_t));
+            cac_comp_pair = reinterpret_cast<em_cac_comp_rprt_pair_t *>(tmp);
+        }
+
+        cac_comp->radios_num++;
+    }
+
+    return len;
 }
 
-short em_channel_t::create_radio_op_restriction_tlv(unsigned char *buff)
+short em_channel_t::create_radio_op_restriction_tlv(unsigned char *buff, int index)
 {
 	short len = 0;
 	short op_len = 0;
@@ -1116,7 +1111,7 @@ short em_channel_t::create_radio_op_restriction_tlv(unsigned char *buff)
 
 	op_rest = reinterpret_cast<em_radio_op_restriction_t *> (buff);
 
-    memcpy(op_rest->ruid, get_radio_interface_mac(), sizeof(mac_address_t));
+    memcpy(op_rest->ruid, dm->get_radio_by_ref(index).get_radio_interface_mac(), sizeof(mac_address_t));
 	op_rest->op_classes_num = 0;
 	op_class_rest = op_rest->op_classes;
 	len += static_cast<short unsigned int> (sizeof(em_radio_op_restriction_t));
@@ -1158,6 +1153,7 @@ int em_channel_t::send_channel_pref_report_msg()
     unsigned char *tmp = buff;
     unsigned short type = htons(ETH_P_1905);
     dm_easy_mesh_t *dm;
+    int radio_index = 0;
 
     dm = get_data_model();
 
@@ -1185,22 +1181,26 @@ int em_channel_t::send_channel_pref_report_msg()
     len += sizeof(em_cmdu_t);
 
     // Zero or more Channel Preference TLVs (see section 17.2.13).
-    tlv = reinterpret_cast<em_tlv_t *> (tmp);
-    tlv->type = em_tlv_type_channel_pref;
-    sz = create_channel_pref_tlv_agent(tlv->value);
-    tlv->len = htons(static_cast<uint16_t> (sz));
+    for (radio_index = 0; radio_index < dm->get_num_radios(); radio_index++) {
+        tlv = reinterpret_cast<em_tlv_t *> (tmp);
+        tlv->type = em_tlv_type_channel_pref;
+        sz = create_channel_pref_tlv_agent(tlv->value, radio_index);
+        tlv->len = htons(static_cast<uint16_t> (sz));
 
-    tmp += sizeof(em_tlv_t) + static_cast<long unsigned int> (sz);
-    len += static_cast<unsigned int> (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
+        tmp += sizeof(em_tlv_t) + static_cast<long unsigned int> (sz);
+        len += static_cast<unsigned int> (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
+    }
 
     // Zero or more Radio Operation Restriction TLVs (see section 17.2.14).
-    tlv = reinterpret_cast<em_tlv_t *> (tmp);
-    tlv->type = em_tlv_type_radio_op_restriction;
-    sz = create_radio_op_restriction_tlv(tlv->value);
-    tlv->len = htons(static_cast<uint16_t> (sz));
+    for(radio_index = 0; radio_index < dm->get_num_radios(); radio_index++) {
+        tlv = reinterpret_cast<em_tlv_t *> (tmp);
+        tlv->type = em_tlv_type_radio_op_restriction;
+        sz = create_radio_op_restriction_tlv(tlv->value, radio_index);
+        tlv->len = htons(static_cast<uint16_t> (sz));
 
-    tmp += (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
-    len += static_cast<unsigned int> (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
+        tmp += (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
+        len += static_cast<unsigned int> (sizeof(em_tlv_t) + static_cast<long unsigned int> (sz));
+    }
 
     // Zero or one CAC Completion Report TLV (see section 17.2.44) [Profile-2].
     tlv = reinterpret_cast<em_tlv_t *> (tmp);
@@ -1237,12 +1237,6 @@ int em_channel_t::send_channel_pref_report_msg()
     tmp += (sizeof (em_tlv_t));
     len += (sizeof (em_tlv_t));
 
-/*
-    if (em_msg_t(em_msg_type_channel_pref_rprt, em_profile_type_3, buff, len).validate(errors) == 0) {
-        printf("Channel Preference Report msg validation failed\n");
-        return -1;
-    }
-*/
     if (send_frame(buff, len)  < 0) {
         printf("%s:%d: Channel Preference Report send failed, error:%d\n", __func__, __LINE__, errno);
         return -1;
@@ -1641,7 +1635,6 @@ int em_channel_t::handle_channel_pref_query(unsigned char *buff, unsigned int le
     em_bus_event_type_channel_pref_query_params_t params;
     em_cmdu_t *cmdu = reinterpret_cast<em_cmdu_t *> (buff + sizeof(em_raw_hdr_t));
 
-    memcpy(params.mac, get_radio_interface_mac(), sizeof(mac_address_t));
     params.msg_id = ntohs(cmdu->id);
    
 	get_mgr()->io_process(em_bus_event_type_channel_pref_query, reinterpret_cast<unsigned char *> (&params), sizeof(em_bus_event_type_channel_pref_query_params_t)); 
@@ -1964,11 +1957,28 @@ void em_channel_t::process_state()
 
     switch (get_state()) {
 		case em_state_agent_channel_pref_query:
-			if ((get_service_type() == em_service_type_agent) && (get_state() < em_state_agent_channel_selection_pending)) {
-				send_channel_pref_report_msg();
-				printf("%s:%d channel_pref_report_msg send\n", __func__, __LINE__);
-				set_state(em_state_agent_channel_selection_pending);
-			}
+                {
+                    int len = 0;
+                    std::vector<em_t *> em_radios;
+                    get_mgr()->get_all_em_for_al_mac(get_data_model()->get_device()->get_dev_interface_mac(), em_radios);
+                    for (auto &em : em_radios){
+                        if ((em->get_service_type() == em_service_type_agent) && (em->get_state() >= em_state_agent_channel_selection_pending)){
+                            em_printfout("radio %s is not in the right state, State = %d, ignoring", util::mac_to_string(em->get_radio_interface_mac()).c_str(), em->get_state());
+                            return;
+                        }
+                    }
+                    em_printfout("All radios are configured for al_mac:%s, sending channel preference report", get_data_model()->get_agent_al_interface_mac());
+
+                    len = send_channel_pref_report_msg();
+                    set_state(em_state_agent_channel_selection_pending);
+                    if (len){
+                        for (auto &em : em_radios){
+                            em->set_state(em_state_agent_channel_selection_pending);
+                        }
+                    }
+                    em_printfout("Sent channel preference report, set state to em_state_agent_channel_selection_pending");
+                    em_radios.clear();
+                }
             break;
         		
         case em_state_agent_channel_report_pending:

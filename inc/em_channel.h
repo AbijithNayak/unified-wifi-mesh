@@ -229,7 +229,7 @@ public:
 	 *
 	 * @note Ensure that the buffer is properly allocated before calling this function.
 	 */
-	short create_radio_op_restriction_tlv(unsigned char *buff);
+	short create_radio_op_restriction_tlv(unsigned char *buff, int index);
     
 	/**!
 	 * @brief Creates a complete CAC report TLV.
@@ -272,7 +272,7 @@ public:
 	 *
 	 * @note Ensure that the buffer is properly allocated before calling this function.
 	 */
-	short create_channel_pref_tlv_agent(unsigned char *buff);
+	short create_channel_pref_tlv_agent(unsigned char *buff, int index);
     
 	/**!
 	 * @brief Creates a TLV for transmit power limit.
